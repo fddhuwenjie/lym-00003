@@ -18,6 +18,9 @@ export class AutomatonSimulator {
         this.isFinished = false;
         this.history = [];
         this.transitionHistory = [];
+        this.fullHistory = [];
+        this.currentHistoryIndex = -1;
+        this.stepResults = [];
         
         const start = this.automaton.getStartState();
         if (start) {
@@ -32,6 +35,8 @@ export class AutomatonSimulator {
                 this.headPosition = 0;
             }
         }
+        
+        this.recordFullSnapshot();
     }
 
     setInput(input) {
@@ -42,6 +47,69 @@ export class AutomatonSimulator {
             this.tape = input.length > 0 ? input.split('') : [TM_BLANK];
             this.headPosition = 0;
         }
+        
+        this.recordFullSnapshot();
+    }
+
+    recordFullSnapshot() {
+        const snapshot = {
+            states: new Set(this.currentStates),
+            position: this.inputPosition,
+            stack: [...this.stack],
+            tape: [...this.tape],
+            head: this.headPosition,
+            isAccepted: this.isAccepted,
+            isRejected: this.isRejected,
+            isFinished: this.isFinished,
+            activeTransitions: this.transitionHistory.length > 0 
+                ? [...this.transitionHistory[this.transitionHistory.length - 1]]
+                : []
+        };
+        this.fullHistory.push(snapshot);
+        this.currentHistoryIndex = this.fullHistory.length - 1;
+    }
+
+    goToHistoryStep(index) {
+        if (index < 0 || index >= this.fullHistory.length) return false;
+        
+        const snapshot = this.fullHistory[index];
+        this.currentStates = new Set(snapshot.states);
+        this.inputPosition = snapshot.position;
+        this.stack = [...snapshot.stack];
+        this.tape = [...snapshot.tape];
+        this.headPosition = snapshot.head;
+        this.isAccepted = snapshot.isAccepted;
+        this.isRejected = snapshot.isRejected;
+        this.isFinished = snapshot.isFinished;
+        this.currentHistoryIndex = index;
+        
+        return true;
+    }
+
+    canStepBackInHistory() {
+        return this.currentHistoryIndex > 0;
+    }
+
+    canStepForwardInHistory() {
+        return this.currentHistoryIndex < this.fullHistory.length - 1;
+    }
+
+    stepBackInHistory() {
+        if (!this.canStepBackInHistory()) return false;
+        return this.goToHistoryStep(this.currentHistoryIndex - 1);
+    }
+
+    stepForwardInHistory() {
+        if (!this.canStepForwardInHistory()) return false;
+        return this.goToHistoryStep(this.currentHistoryIndex + 1);
+    }
+
+    getFullHistoryLength() {
+        return this.fullHistory.length;
+    }
+
+    getCurrentHistoryIndex() {
+        return this.currentHistoryIndex;
     }
 
     epsilonClosure(stateId) {
@@ -118,10 +186,13 @@ export class AutomatonSimulator {
         }
         
         this.transitionHistory.push(stepResult.transitions);
+        this.stepResults.push(stepResult);
         
         if (!this.canStep()) {
             this.checkAcceptance();
         }
+        
+        this.recordFullSnapshot();
         
         return stepResult;
     }

@@ -38,6 +38,12 @@
                     <button class="tool-btn" id="btn-delete" title="删除选中 (Del)">
                         <span class="icon">🗑</span> 删除
                     </button>
+                    <button class="tool-btn" id="btn-minimize" title="DFA最小化">
+                        <span class="icon">✂️</span> 最小化
+                    </button>
+                    <button class="tool-btn" id="btn-compare" title="对比模式">
+                        <span class="icon">⚖️</span> 对比
+                    </button>
                 </div>
                 <div class="history-tools">
                     <button class="tool-btn" id="btn-undo" title="撤销 (Ctrl+Z)">
@@ -64,8 +70,8 @@
             </div>
         </header>
 
-        <div class="main-content">
-            <aside class="sidebar left-sidebar">
+        <div class="main-content" id="main-content">
+            <aside class="sidebar left-sidebar" id="left-sidebar">
                 <div class="sidebar-section">
                     <h3>🎯 正则转换</h3>
                     <div class="regex-panel">
@@ -80,14 +86,35 @@
                 </div>
 
                 <div class="sidebar-section">
+                    <h3>✂️ DFA 最小化</h3>
+                    <div id="minimization-panel" class="minimization-panel" style="display:none;">
+                        <div id="minimization-groups" class="minimization-groups"></div>
+                        <div id="minimization-steps" class="minimization-steps"></div>
+                    </div>
+                    <div id="minimization-hint" style="color:#64748b;font-size:13px;text-align:center;padding:20px;">
+                        当前不是 DFA 或未点击「最小化」按钮
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
                     <h3>▶️ 模拟运行</h3>
                     <div class="simulation-panel">
                         <input type="text" id="input-string" placeholder="输入测试串">
+                        <div id="input-display" class="input-display"></div>
                         <div class="simulation-controls">
                             <button id="btn-reset-sim" title="重置">⏮</button>
+                            <button id="btn-step-back-sim" title="上一步">⏪</button>
                             <button id="btn-step-sim" title="单步执行">⏭</button>
                             <button id="btn-play-sim" title="自动播放">▶</button>
                             <button id="btn-pause-sim" title="暂停" disabled>⏸</button>
+                        </div>
+                        <div class="timeline-container">
+                            <div class="timeline-header">
+                                <span>时间轴</span>
+                                <span id="timeline-info">0/0</span>
+                            </div>
+                            <input type="range" id="timeline-slider" min="0" max="0" value="0" step="1">
+                            <div id="timeline-markers" class="timeline-markers"></div>
                         </div>
                         <div class="simulation-speed">
                             <label>速度:</label>
@@ -111,24 +138,59 @@
                     </div>
                     <div id="tm-tape" class="tm-tape" style="display:none;">
                         <h4>磁带内容:</h4>
-                        <div id="tape-display" class="tape-display"></div>
+                        <div id="tape-display-wrapper" class="tape-display-wrapper">
+                            <div id="tape-display" class="tape-display"></div>
+                        </div>
                     </div>
                 </div>
             </aside>
 
-            <main class="canvas-container">
-                <canvas id="main-canvas"></canvas>
-                <div class="canvas-controls">
-                    <button id="btn-zoom-in" title="放大">+</button>
-                    <span id="zoom-level">100%</span>
-                    <button id="btn-zoom-out" title="缩小">−</button>
-                    <button id="btn-zoom-fit" title="适应画布">⛶</button>
-                </div>
-                <div class="status-bar">
-                    <span id="status-text">就绪</span>
-                    <span id="mouse-position">x: 0, y: 0</span>
-                </div>
-            </main>
+            <div class="canvas-area" id="canvas-area">
+                <main class="canvas-container" id="canvas-container-left">
+                    <div class="canvas-header" id="canvas-header-left" style="display:none;">
+                        <span class="canvas-title">自动机 A</span>
+                        <button class="close-compare-btn" data-side="left">✕</button>
+                    </div>
+                    <canvas id="main-canvas"></canvas>
+                    <div class="canvas-controls">
+                        <button id="btn-zoom-in" title="放大">+</button>
+                        <span id="zoom-level">100%</span>
+                        <button id="btn-zoom-out" title="缩小">−</button>
+                        <button id="btn-zoom-fit" title="适应画布">⛶</button>
+                    </div>
+                    <div class="compare-input" id="compare-input-left" style="display:none;">
+                        <input type="text" id="input-string-left" placeholder="输入测试串 A">
+                        <div id="input-display-left" class="input-display"></div>
+                    </div>
+                </main>
+
+                <main class="canvas-container" id="canvas-container-right" style="display:none;">
+                    <div class="canvas-header">
+                        <span class="canvas-title">自动机 B</span>
+                        <button class="close-compare-btn" data-side="right">✕</button>
+                    </div>
+                    <canvas id="main-canvas-right"></canvas>
+                    <div class="canvas-controls canvas-controls-right">
+                        <button id="btn-zoom-in-right" title="放大">+</button>
+                        <span id="zoom-level-right">100%</span>
+                        <button id="btn-zoom-out-right" title="缩小">−</button>
+                        <button id="btn-zoom-fit-right" title="适应画布">⛶</button>
+                    </div>
+                    <div class="compare-input">
+                        <input type="text" id="input-string-right" placeholder="输入测试串 B">
+                        <div id="input-display-right" class="input-display"></div>
+                    </div>
+                    <div class="sync-controls">
+                        <label><input type="checkbox" id="sync-steps" checked> 同步单步执行</label>
+                        <button id="btn-sync-step" title="同步单步">⏭ 同步</button>
+                    </div>
+                </main>
+            </div>
+
+            <div class="status-bar" id="main-status-bar">
+                <span id="status-text">就绪</span>
+                <span id="mouse-position">x: 0, y: 0</span>
+            </div>
 
             <aside class="sidebar right-sidebar">
                 <div class="sidebar-section">

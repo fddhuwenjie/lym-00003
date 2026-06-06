@@ -191,4 +191,189 @@ export class Automaton {
 
         return errors;
     }
+
+    minimizeDFA() {
+        if (this.type !== AUTOMATON_TYPES.DFA) {
+            throw new Error('只能对 DFA 执行最小化');
+        }
+
+        const validation = this.validate();
+        if (validation.length > 0) {
+            throw new Error('DFA 不完整，无法最小化: ' + validation.join('; '));
+        }
+
+        const states = Array.from(this.states.values());
+        const stateIds = states.map(s => s.id);
+        const alphabet = Array.from(this.alphabet);
+        
+        const steps = [];
+        const n = states.length;
+        
+        const isAccept = new Map();
+        states.forEach(s => isAccept.set(s.id, s.isAccept));
+        
+        const table = new Map();
+        for (let i = 0; i < n; i++) {
+            for (let j = i + 1; j < n; j++) {
+                const key = `${stateIds[i]},${stateIds[j]}`;
+                table.set(key, false);
+            }
+        }
+        
+        for (let i = 0; i < n; i++) {
+            for (let j = i + 1; j < n; j++) {
+                const s1 = stateIds[i], s2 = stateIds[j];
+                if (isAccept.get(s1) !== isAccept.get(s2)) {
+                    table.set(`${s1},${s2}`, true);
+                }
+            }
+        }
+        
+        steps.push({
+            description: '初始标记：区分接受状态和非接受状态',
+            markedPairs: Array.from(table.entries()).filter(([, v]) => v).map(([k]) => k),
+            groups: this.getGroupsFromTable(table, stateIds)
+        });
+        
+        let changed = true;
+        let iteration = 0;
+        while (changed) {
+            changed = false;
+            iteration++;
+            
+            for (let i = 0; i < n; i++) {
+                for (let j = i + 1; j < n; j++) {
+                    const s1 = stateIds[i], s2 = stateIds[j];
+                    const key = `${s1},${s2}`;
+                    
+                    if (table.get(key)) continue;
+                    
+                    for (const symbol of alphabet) {
+                        const t1 = this.getTransitionForSymbol(s1, symbol);
+                        const t2 = this.getTransitionForSymbol(s2, symbol);
+                        
+                        if (!t1 || !t2) continue;
+                        
+                        let pairKey;
+                        const idx1 = stateIds.indexOf(t1.to);
+                        const idx2 = stateIds.indexOf(t2.to);
+                        
+                        if (idx1 < idx2) {
+                            pairKey = `${t1.to},${t2.to}`;
+                        } else if (idx1 > idx2) {
+                            pairKey = `${t2.to},${t1.to}`;
+                        } else {
+                            continue;
+                        }
+                        
+                        if (table.get(pairKey)) {
+                            table.set(key, true);
+                            changed = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            steps.push({
+                description: `迭代 ${iteration}：检查转移目标`,
+                markedPairs: Array.from(table.entries()).filter(([, v]) => v).map(([k]) => k),
+                groups: this.getGroupsFromTable(table, stateIds)
+            });
+        }
+        
+        const groups = this.getGroupsFromTable(table, stateIds);
+        
+        steps.push({
+            description: '最终等价类分组',
+            groups: groups.map(g => g.map(id => this.states.get(id)?.name || id))
+        });
+        
+        const minimized = new Automaton(AUTOMATON_TYPES.DFA);
+        const groupMap = new Map();
+        const oldToNew = new Map();
+        
+        groups.forEach((group, idx) => {
+            const groupName = group.map(id => this.states.get(id)?.name || id).join(',');
+            const isGroupStart = group.some(id => this.states.get(id)?.isStart);
+            const isGroupAccept = group.some(id => this.states.get(id)?.isAccept);
+            
+            const newState = minimized.addState(`{${groupName}}`);
+            newState.isStart = isGroupStart;
+            newState.isAccept = isGroupAccept;
+            
+            if (isGroupStart) {
+                minimized.startStateId = newState.id;
+            }
+            
+            group.forEach(id => oldToNew.set(id, newState.id));
+            groupMap.set(newState.id, group);
+        });
+        
+        for (const group of groups) {
+            const rep = group[0];
+            const newFromId = oldToNew.get(rep);
+            
+            for (const symbol of alphabet) {
+                const trans = this.getTransitionForSymbol(rep, symbol);
+                if (trans) {
+                    const newToId = oldToNew.get(trans.to);
+                    minimized.addTransition(newFromId, newToId, symbol);
+                }
+            }
+        }
+        
+        return {
+            automaton: minimized,
+            steps: steps,
+            groups: groups.map(g => g.map(id => this.states.get(id)?.name || id)),
+            oldToNew: oldToNew
+        };
+    }
+
+    getGroupsFromTable(table, stateIds) {
+        const parent = new Map();
+        stateIds.forEach(id => parent.set(id, id));
+        
+        const find = (x) => {
+            if (parent.get(x) !== x) {
+                parent.set(x, find(parent.get(x)));
+            }
+            return parent.get(x);
+        };
+        
+        const union = (x, y) => {
+            const px = find(x), py = find(y);
+            if (px !== py) {
+                parent.set(py, px);
+            }
+        };
+        
+        const n = stateIds.length;
+        for (let i = 0; i < n; i++) {
+            for (let j = i + 1; j < n; j++) {
+                const s1 = stateIds[i], s2 = stateIds[j];
+                const key = `${s1},${s2}`;
+                if (!table.get(key)) {
+                    union(s1, s2);
+                }
+            }
+        }
+        
+        const groups = new Map();
+        stateIds.forEach(id => {
+            const root = find(id);
+            if (!groups.has(root)) {
+                groups.set(root, []);
+            }
+            groups.get(root).push(id);
+        });
+        
+        return Array.from(groups.values());
+    }
+
+    getTransitionForSymbol(stateId, symbol) {
+        const transitions = this.getTransitionsFrom(stateId);
+        return transitions.find(t => t.symbol === symbol);
+    }
 }

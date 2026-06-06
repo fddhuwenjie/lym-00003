@@ -25,11 +25,35 @@ export class App {
         this.currentStepIndex = -1;
         this.isModified = false;
         
+        this.isCompareMode = false;
+        this.rightCanvas = null;
+        this.rightRenderer = null;
+        this.rightAutomaton = null;
+        this.rightSimulator = null;
+        this.savedLeftAutomaton = null;
+        
+        this.minimizationResult = null;
+        this.isTimelineDragging = false;
+        
+        this.tapeDragStartX = 0;
+        this.tapeScrollLeft = 0;
+        this.isTapeDragging = false;
+        
         this.initializeCanvas();
+        this.initializeCompareCanvas();
         this.bindUIEvents();
         this.updateUI();
         this.pushHistory();
         this.render();
+    }
+
+    initializeCompareCanvas() {
+        this.rightCanvas = document.getElementById('main-canvas-right');
+        if (this.rightCanvas) {
+            this.rightRenderer = new CanvasRenderer(this.rightCanvas);
+            const container = this.rightCanvas.parentElement;
+            this.rightRenderer.resize(container.clientWidth - 4, container.clientHeight - 4);
+        }
     }
 
     initializeCanvas() {
@@ -61,6 +85,9 @@ export class App {
             this.interaction.setEditMode(EDIT_MODE.DELETE);
         });
 
+        document.getElementById('btn-minimize').addEventListener('click', () => this.minimizeDFA());
+        document.getElementById('btn-compare').addEventListener('click', () => this.toggleCompareMode());
+
         document.getElementById('btn-undo').addEventListener('click', () => this.undo());
         document.getElementById('btn-redo').addEventListener('click', () => this.redo());
         document.getElementById('btn-layout').addEventListener('click', () => this.autoLayout());
@@ -74,9 +101,18 @@ export class App {
         document.getElementById('btn-step-conversion').addEventListener('click', () => this.stepConversion());
 
         document.getElementById('btn-reset-sim').addEventListener('click', () => this.resetSimulation());
+        document.getElementById('btn-step-back-sim').addEventListener('click', () => this.stepBackSimulation());
         document.getElementById('btn-step-sim').addEventListener('click', () => this.stepSimulation());
         document.getElementById('btn-play-sim').addEventListener('click', () => this.togglePlay());
         document.getElementById('btn-pause-sim').addEventListener('click', () => this.pauseSimulation());
+
+        document.getElementById('timeline-slider').addEventListener('input', (e) => {
+            this.isTimelineDragging = true;
+            this.goToTimelineStep(parseInt(e.target.value));
+        });
+        document.getElementById('timeline-slider').addEventListener('change', () => {
+            this.isTimelineDragging = false;
+        });
 
         document.getElementById('sim-speed').addEventListener('input', (e) => {
             this.playSpeed = parseInt(e.target.value);
@@ -103,6 +139,34 @@ export class App {
             this.render();
         });
 
+        document.getElementById('btn-zoom-in-right').addEventListener('click', () => {
+            if (this.rightRenderer) {
+                this.rightRenderer.zoom *= 1.2;
+                this.updateZoomLevelRight();
+                this.renderRight();
+            }
+        });
+        document.getElementById('btn-zoom-out-right').addEventListener('click', () => {
+            if (this.rightRenderer) {
+                this.rightRenderer.zoom /= 1.2;
+                this.updateZoomLevelRight();
+                this.renderRight();
+            }
+        });
+        document.getElementById('btn-zoom-fit-right').addEventListener('click', () => {
+            if (this.rightRenderer && this.rightAutomaton) {
+                this.rightRenderer.fitToView(this.rightAutomaton);
+                this.updateZoomLevelRight();
+                this.renderRight();
+            }
+        });
+
+        document.getElementById('btn-sync-step').addEventListener('click', () => this.syncStepBoth());
+
+        document.querySelectorAll('.close-compare-btn').forEach(btn => {
+            btn.addEventListener('click', () => this.toggleCompareMode());
+        });
+
         document.querySelectorAll('.modal .close-btn, #btn-cancel-import').forEach(btn => {
             btn.addEventListener('click', () => {
                 document.querySelectorAll('.modal').forEach(m => m.classList.remove('show'));
@@ -113,7 +177,38 @@ export class App {
         document.getElementById('btn-copy-export').addEventListener('click', () => this.copyExport());
         document.getElementById('btn-download-export').addEventListener('click', () => this.downloadExport());
 
+        this.bindTapeDragEvents();
         this.updateEditButtons();
+    }
+
+    bindTapeDragEvents() {
+        const tapeWrapper = document.getElementById('tape-display-wrapper');
+        if (!tapeWrapper) return;
+
+        tapeWrapper.addEventListener('mousedown', (e) => {
+            this.isTapeDragging = true;
+            this.tapeDragStartX = e.pageX - tapeWrapper.offsetLeft;
+            this.tapeScrollLeft = tapeWrapper.scrollLeft;
+            tapeWrapper.style.cursor = 'grabbing';
+        });
+
+        tapeWrapper.addEventListener('mouseleave', () => {
+            this.isTapeDragging = false;
+            tapeWrapper.style.cursor = 'grab';
+        });
+
+        tapeWrapper.addEventListener('mouseup', () => {
+            this.isTapeDragging = false;
+            tapeWrapper.style.cursor = 'grab';
+        });
+
+        tapeWrapper.addEventListener('mousemove', (e) => {
+            if (!this.isTapeDragging) return;
+            e.preventDefault();
+            const x = e.pageX - tapeWrapper.offsetLeft;
+            const walk = (x - this.tapeDragStartX) * 2;
+            tapeWrapper.scrollLeft = this.tapeScrollLeft - walk;
+        });
     }
 
     switchModel(type) {
@@ -125,6 +220,7 @@ export class App {
         this.pushHistory();
         this.conversionSteps = [];
         this.currentStepIndex = -1;
+        this.minimizationResult = null;
         
         document.querySelectorAll('.model-btn').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.model === type);
@@ -135,6 +231,19 @@ export class App {
         
         document.getElementById('btn-regex-to-nfa').disabled = type !== AUTOMATON_TYPES.NFA && type !== AUTOMATON_TYPES.DFA;
         document.getElementById('btn-nfa-to-dfa').disabled = type !== AUTOMATON_TYPES.NFA;
+        document.getElementById('btn-minimize').disabled = type !== AUTOMATON_TYPES.DFA;
+        
+        const minPanel = document.getElementById('minimization-panel');
+        const minHint = document.getElementById('minimization-hint');
+        if (type === AUTOMATON_TYPES.DFA) {
+            minHint.style.display = 'block';
+            minHint.textContent = '点击「最小化」按钮对 DFA 执行状态等价合并';
+            minPanel.style.display = 'none';
+        } else {
+            minPanel.style.display = 'none';
+            minHint.style.display = 'block';
+            minHint.textContent = '当前不是 DFA，无法使用最小化功能';
+        }
         
         this.updateUI();
         this.render();
@@ -206,6 +315,256 @@ export class App {
 
     render() {
         this.renderer.render(this.automaton);
+    }
+
+    renderRight() {
+        if (this.rightRenderer && this.rightAutomaton) {
+            this.rightRenderer.render(this.rightAutomaton);
+        }
+    }
+
+    updateZoomLevelRight() {
+        if (this.rightRenderer) {
+            document.getElementById('zoom-level-right').textContent = `${Math.round(this.rightRenderer.zoom * 100)}%`;
+        }
+    }
+
+    minimizeDFA() {
+        if (this.automaton.type !== AUTOMATON_TYPES.DFA) {
+            alert('当前自动机不是 DFA，无法最小化');
+            return;
+        }
+
+        try {
+            this.stopSimulation();
+            const result = this.automaton.minimizeDFA();
+            this.minimizationResult = result;
+
+            this.automaton = result.automaton;
+            this.history.clear();
+            this.pushHistory();
+
+            this.displayMinimizationResult(result);
+
+            this.autoLayout();
+            this.updateUI();
+            this.render();
+            this.updateStatus(`DFA 最小化完成：${result.groups.length} 个等价类`);
+        } catch (e) {
+            alert('最小化失败: ' + e.message);
+        }
+    }
+
+    displayMinimizationResult(result) {
+        const panel = document.getElementById('minimization-panel');
+        const hint = document.getElementById('minimization-hint');
+        const groupsContainer = document.getElementById('minimization-groups');
+        const stepsContainer = document.getElementById('minimization-steps');
+
+        panel.style.display = 'block';
+        hint.style.display = 'none';
+
+        groupsContainer.innerHTML = `
+            <div style="font-size:12px;color:#94a3b8;margin-bottom:8px;">等价类分组 (${result.groups.length} 组)</div>
+            ${result.groups.map((group, i) => `
+                <div class="minimization-group">
+                    <div class="group-label">组 ${i + 1}</div>
+                    <div class="group-states">{ ${group.join(', ')} }</div>
+                </div>
+            `).join('')}
+        `;
+
+        stepsContainer.innerHTML = `
+            <div style="font-size:12px;color:#94a3b8;margin-bottom:8px;">合并过程</div>
+            ${result.steps.map((step, i) => `
+                <div class="minimization-step ${i === result.steps.length - 1 ? 'active' : ''}">
+                    <strong>步骤 ${i + 1}:</strong> ${step.description}
+                </div>
+            `).join('')}
+        `;
+    }
+
+    toggleCompareMode() {
+        const leftContainer = document.getElementById('canvas-container-left');
+        const rightContainer = document.getElementById('canvas-container-right');
+        const leftHeader = document.getElementById('canvas-header-left');
+        const compareInputLeft = document.getElementById('compare-input-left');
+        const leftSidebar = document.getElementById('left-sidebar');
+        const rightSidebar = document.querySelector('.right-sidebar');
+
+        if (!this.isCompareMode) {
+            if (this.automaton.states.size === 0) {
+                alert('请先创建或加载一个自动机');
+                return;
+            }
+
+            this.savedLeftAutomaton = deepClone(this.automaton.toJSON());
+            this.rightAutomaton = Automaton.fromJSON(this.savedLeftAutomaton);
+
+            this.isCompareMode = true;
+            document.getElementById('btn-compare').classList.add('active');
+
+            leftContainer.classList.add('compare-mode');
+            rightContainer.style.display = 'block';
+            leftHeader.style.display = 'flex';
+            compareInputLeft.style.display = 'block';
+            leftSidebar.style.width = '280px';
+            rightSidebar.style.width = '280px';
+
+            const leftInput = document.getElementById('input-string').value;
+            document.getElementById('input-string-left').value = leftInput;
+            document.getElementById('input-string-right').value = leftInput;
+
+            this.initializeCompareCanvas();
+            this.rightRenderer.fitToView(this.rightAutomaton);
+            this.updateZoomLevelRight();
+            this.renderRight();
+
+            this.updateStatus('已进入对比模式');
+        } else {
+            this.isCompareMode = false;
+            document.getElementById('btn-compare').classList.remove('active');
+
+            leftContainer.classList.remove('compare-mode');
+            rightContainer.style.display = 'none';
+            leftHeader.style.display = 'none';
+            compareInputLeft.style.display = 'none';
+            leftSidebar.style.width = '320px';
+            rightSidebar.style.width = '320px';
+
+            this.rightSimulator = null;
+            this.rightAutomaton = null;
+
+            this.updateStatus('已退出对比模式');
+        }
+
+        this.resizeCanvases();
+    }
+
+    resizeCanvases() {
+        const leftContainer = this.canvas.parentElement;
+        this.renderer.resize(leftContainer.clientWidth, leftContainer.clientHeight);
+
+        if (this.rightCanvas) {
+            const rightContainer = this.rightCanvas.parentElement;
+            this.rightRenderer.resize(rightContainer.clientWidth - 4, rightContainer.clientHeight - 4);
+        }
+
+        this.render();
+        this.renderRight();
+    }
+
+    stepBackSimulation() {
+        if (!this.simulator) return;
+
+        if (this.simulator.stepBackInHistory()) {
+            this.updateSimulationDisplay();
+            this.updateTimelineUI();
+            this.render();
+        }
+    }
+
+    goToTimelineStep(index) {
+        if (!this.simulator) return;
+
+        if (this.simulator.goToHistoryStep(index)) {
+            this.updateSimulationDisplay();
+            this.render();
+            document.getElementById('timeline-info').textContent = 
+                `${index}/${this.simulator.getFullHistoryLength() - 1}`;
+        }
+    }
+
+    syncStepBoth() {
+        if (!this.isCompareMode) return;
+
+        const syncEnabled = document.getElementById('sync-steps').checked;
+        
+        if (syncEnabled) {
+            this.stepSimulation();
+            
+            if (!this.rightSimulator) {
+                const input = document.getElementById('input-string-right').value;
+                this.rightSimulator = new AutomatonSimulator(this.rightAutomaton);
+                this.rightSimulator.setInput(input);
+            }
+            
+            if (!this.rightSimulator.isFinished) {
+                this.rightSimulator.step();
+                this.rightRenderer.setActiveStates(this.rightSimulator.getActiveStates());
+                this.rightRenderer.setActiveTransitions(this.rightSimulator.getActiveTransitions());
+                this.renderRight();
+                this.updateCompareSimulationDisplay();
+            }
+        } else {
+            this.stepSimulation();
+        }
+    }
+
+    updateInputDisplay() {
+        const displayEl = document.getElementById('input-display');
+        const input = document.getElementById('input-string').value;
+        
+        if (!input || !this.simulator) {
+            displayEl.innerHTML = '';
+            return;
+        }
+
+        const pos = this.simulator.inputPosition;
+        displayEl.innerHTML = input.split('').map((char, i) => {
+            let className = 'char';
+            if (i < pos) className += ' read';
+            else if (i === pos) className += ' current';
+            else className += ' unread';
+            return `<span class="${className}">${char}</span>`;
+        }).join('');
+    }
+
+    updateInputDisplayFor(side, simulator, input) {
+        const displayEl = document.getElementById(`input-display-${side}`);
+        if (!displayEl || !simulator || !input) {
+            if (displayEl) displayEl.innerHTML = '';
+            return;
+        }
+
+        const pos = simulator.inputPosition;
+        displayEl.innerHTML = input.split('').map((char, i) => {
+            let className = 'char';
+            if (i < pos) className += ' read';
+            else if (i === pos) className += ' current';
+            else className += ' unread';
+            return `<span class="${className}">${char}</span>`;
+        }).join('');
+    }
+
+    updateTimelineUI() {
+        if (!this.simulator) {
+            document.getElementById('timeline-slider').max = 0;
+            document.getElementById('timeline-slider').value = 0;
+            document.getElementById('timeline-info').textContent = '0/0';
+            document.getElementById('timeline-markers').innerHTML = '';
+            return;
+        }
+
+        const historyLen = this.simulator.getFullHistoryLength();
+        const currentIdx = this.simulator.getCurrentHistoryIndex();
+        
+        document.getElementById('timeline-slider').max = historyLen - 1;
+        document.getElementById('timeline-slider').value = currentIdx;
+        document.getElementById('timeline-info').textContent = `${currentIdx}/${historyLen - 1}`;
+
+        const markersContainer = document.getElementById('timeline-markers');
+        markersContainer.innerHTML = '';
+
+        this.simulator.fullHistory.forEach((snapshot, i) => {
+            const marker = document.createElement('div');
+            marker.className = 'timeline-marker';
+            if (snapshot.isAccepted) marker.classList.add('accept');
+            else if (snapshot.isRejected) marker.classList.add('reject');
+            if (i === currentIdx) marker.classList.add('current');
+            marker.style.left = `${(i / (historyLen - 1)) * 100}%`;
+            markersContainer.appendChild(marker);
+        });
     }
 
     updateUI() {
@@ -637,6 +996,18 @@ export class App {
         document.getElementById('btn-play-sim').disabled = false;
         document.getElementById('stack-display').innerHTML = '';
         document.getElementById('tape-display').innerHTML = '';
+        document.getElementById('input-display').innerHTML = '';
+        document.getElementById('timeline-slider').max = 0;
+        document.getElementById('timeline-slider').value = 0;
+        document.getElementById('timeline-info').textContent = '0/0';
+        document.getElementById('timeline-markers').innerHTML = '';
+        
+        if (this.rightSimulator) {
+            this.rightSimulator = null;
+            this.rightRenderer.clearHighlights();
+            this.renderRight();
+        }
+        
         this.render();
         this.updateStatus('模拟已重置');
     }
@@ -715,6 +1086,9 @@ export class App {
     updateSimulationDisplay() {
         if (!this.simulator) return;
         
+        this.updateInputDisplay();
+        this.updateTimelineUI();
+        
         if (this.automaton.type === AUTOMATON_TYPES.PDA) {
             const stack = this.simulator.getStack();
             const display = document.getElementById('stack-display');
@@ -726,13 +1100,53 @@ export class App {
         }
         
         if (this.automaton.type === AUTOMATON_TYPES.TM) {
-            const tape = this.simulator.getTape();
-            const head = this.simulator.getHeadPosition();
-            const display = document.getElementById('tape-display');
-            display.innerHTML = tape.map((cell, i) => 
-                `<div class="tape-cell ${i === head ? 'head' : ''}">${cell}</div>`
-            ).join('');
+            this.updateTapeDisplay();
         }
+    }
+
+    updateTapeDisplay() {
+        if (!this.simulator) return;
+        
+        let tape = [...this.simulator.getTape()];
+        let head = this.simulator.getHeadPosition();
+        
+        const extraCells = 10;
+        while (head < extraCells) {
+            tape.unshift(TM_BLANK);
+            head++;
+        }
+        while (tape.length - head <= extraCells) {
+            tape.push(TM_BLANK);
+        }
+        
+        const display = document.getElementById('tape-display');
+        display.innerHTML = tape.map((cell, i) => {
+            const isHead = i === head;
+            const isBlank = cell === TM_BLANK;
+            return `<div class="tape-cell ${isHead ? 'head' : ''} ${isBlank ? 'blank' : ''}">${cell}</div>`;
+        }).join('');
+        
+        const wrapper = document.getElementById('tape-display-wrapper');
+        if (wrapper) {
+            const cells = display.querySelectorAll('.tape-cell');
+            const headCell = display.querySelector('.tape-cell.head');
+            if (headCell) {
+                const wrapperRect = wrapper.getBoundingClientRect();
+                const cellRect = headCell.getBoundingClientRect();
+                const scrollLeft = headCell.offsetLeft - wrapper.clientWidth / 2 + headCell.offsetWidth / 2;
+                wrapper.scrollLeft = scrollLeft;
+            }
+        }
+    }
+
+    updateCompareSimulationDisplay() {
+        if (!this.isCompareMode) return;
+        
+        const leftInput = document.getElementById('input-string-left').value;
+        const rightInput = document.getElementById('input-string-right').value;
+        
+        this.updateInputDisplayFor('left', this.simulator, leftInput);
+        this.updateInputDisplayFor('right', this.rightSimulator, rightInput);
     }
 
     updateSimulationResult() {

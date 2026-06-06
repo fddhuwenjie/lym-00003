@@ -16,9 +16,11 @@ export class CanvasRenderer {
         this.selectedStateId = null;
         this.selectedTransitionId = null;
         this.activeStateIds = new Set();
+        this.activeStateOpacities = new Map();
         this.activeTransitionIds = new Set();
         this.previewTransition = null;
         this.gridSize = 40;
+        this.automatonType = 'dfa';
     }
 
     resize(width, height) {
@@ -150,16 +152,37 @@ export class CanvasRenderer {
             const radius = isHovered || isSelected ? STATE_RADIUS_LARGE : STATE_RADIUS;
             
             if (isActive) {
+                const opacity = this.activeStateOpacities.get(state.id) || 0.4;
+                const glowRadius = radius * (1.5 + opacity);
+                
                 const gradient = ctx.createRadialGradient(
-                    state.x, state.y, radius * 0.5,
-                    state.x, state.y, radius * 2
+                    state.x, state.y, radius * 0.3,
+                    state.x, state.y, glowRadius
                 );
-                gradient.addColorStop(0, 'rgba(34, 197, 94, 0.4)');
+                gradient.addColorStop(0, `rgba(34, 197, 94, ${opacity})`);
+                gradient.addColorStop(0.5, `rgba(34, 197, 94, ${opacity * 0.5})`);
                 gradient.addColorStop(1, 'rgba(34, 197, 94, 0)');
                 ctx.fillStyle = gradient;
                 ctx.beginPath();
-                ctx.arc(state.x, state.y, radius * 2, 0, Math.PI * 2);
+                ctx.arc(state.x, state.y, glowRadius, 0, Math.PI * 2);
                 ctx.fill();
+                
+                const colors = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+                const colorIndex = Array.from(this.activeStateIds).indexOf(state.id) % colors.length;
+                const activeColor = colors[colorIndex];
+                
+                const ringGradient = ctx.createRadialGradient(
+                    state.x, state.y, radius,
+                    state.x, state.y, radius + 4
+                );
+                ringGradient.addColorStop(0, 'transparent');
+                ringGradient.addColorStop(0.5, activeColor);
+                ringGradient.addColorStop(1, 'transparent');
+                ctx.strokeStyle = ringGradient;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(state.x, state.y, radius + 2, 0, Math.PI * 2);
+                ctx.stroke();
             }
             
             if (isStart) {
@@ -544,11 +567,30 @@ export class CanvasRenderer {
 
     clearHighlights() {
         this.activeStateIds.clear();
+        this.activeStateOpacities.clear();
         this.activeTransitionIds.clear();
     }
 
     setActiveStates(ids) {
         this.activeStateIds = new Set(ids);
+        this.activeStateOpacities.clear();
+        const count = ids.length;
+        ids.forEach((id, index) => {
+            const baseOpacity = 0.3;
+            const maxOpacity = 0.8;
+            const opacity = count > 1 
+                ? baseOpacity + (1 - index / count) * (maxOpacity - baseOpacity)
+                : maxOpacity;
+            this.activeStateOpacities.set(id, opacity);
+        });
+    }
+
+    setActiveStatesWithOpacities(ids, opacities) {
+        this.activeStateIds = new Set(ids);
+        this.activeStateOpacities = new Map();
+        ids.forEach((id, index) => {
+            this.activeStateOpacities.set(id, opacities[index] || 0.5);
+        });
     }
 
     setActiveTransitions(ids) {

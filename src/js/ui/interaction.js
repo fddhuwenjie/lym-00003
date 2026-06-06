@@ -29,45 +29,73 @@ export class InteractionManager {
     }
 
     bindEvents() {
-        this.canvas.addEventListener('mousedown', (e) => this.onMouseDown(e));
-        this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
-        this.canvas.addEventListener('mouseup', (e) => this.onMouseUp(e));
-        this.canvas.addEventListener('mouseleave', (e) => this.onMouseLeave(e));
-        this.canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
+        this.canvas.addEventListener('mousedown', (e) => this.onMouseDown(e, 'left'));
+        this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e, 'left'));
+        this.canvas.addEventListener('mouseup', (e) => this.onMouseUp(e, 'left'));
+        this.canvas.addEventListener('mouseleave', (e) => this.onMouseLeave(e, 'left'));
+        this.canvas.addEventListener('wheel', (e) => this.onWheel(e, 'left'), { passive: false });
         this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+        
+        const rightCanvas = document.getElementById('main-canvas-right');
+        if (rightCanvas) {
+            rightCanvas.addEventListener('mousedown', (e) => this.onMouseDown(e, 'right'));
+            rightCanvas.addEventListener('mousemove', (e) => this.onMouseMove(e, 'right'));
+            rightCanvas.addEventListener('mouseup', (e) => this.onMouseUp(e, 'right'));
+            rightCanvas.addEventListener('mouseleave', (e) => this.onMouseLeave(e, 'right'));
+            rightCanvas.addEventListener('wheel', (e) => this.onWheel(e, 'right'), { passive: false });
+            rightCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+        }
         
         document.addEventListener('keydown', (e) => this.onKeyDown(e));
         
         window.addEventListener('resize', () => this.onResize());
     }
 
-    getCanvasMousePos(e) {
-        const rect = this.canvas.getBoundingClientRect();
+    getCanvasMousePos(e, canvas) {
+        const rect = canvas.getBoundingClientRect();
         return {
             x: e.clientX - rect.left,
             y: e.clientY - rect.top
         };
     }
 
-    onMouseDown(e) {
-        const screenPos = this.getCanvasMousePos(e);
-        const worldPos = this.renderer.screenToWorld(screenPos.x, screenPos.y);
+    getContext(side) {
+        if (side === 'right' && this.app.isCompareMode) {
+            return {
+                canvas: this.app.rightCanvas,
+                renderer: this.app.rightRenderer,
+                automaton: this.app.rightAutomaton
+            };
+        }
+        return {
+            canvas: this.canvas,
+            renderer: this.renderer,
+            automaton: this.app.automaton
+        };
+    }
+
+    onMouseDown(e, side = 'left') {
+        const ctx = this.getContext(side);
+        if (!ctx.renderer || !ctx.automaton) return;
+        
+        const screenPos = this.getCanvasMousePos(e, ctx.canvas);
+        const worldPos = ctx.renderer.screenToWorld(screenPos.x, screenPos.y);
         this.lastMousePos = screenPos;
         
-        const state = this.renderer.getStateAtPoint(worldPos.x, worldPos.y, this.app.automaton);
-        const transition = this.renderer.getTransitionAtPoint(worldPos.x, worldPos.y, this.app.automaton);
+        const state = ctx.renderer.getStateAtPoint(worldPos.x, worldPos.y, ctx.automaton);
+        const transition = ctx.renderer.getTransitionAtPoint(worldPos.x, worldPos.y, ctx.automaton);
         
         if (e.button === 1 || (e.button === 0 && e.altKey)) {
             this.isPanning = true;
-            this.canvas.style.cursor = 'grabbing';
+            ctx.canvas.style.cursor = 'grabbing';
             return;
         }
         
         switch (this.editMode) {
             case EDIT_MODE.SELECT:
                 if (state) {
-                    this.renderer.selectedStateId = state.id;
-                    this.renderer.selectedTransitionId = null;
+                    ctx.renderer.selectedStateId = state.id;
+                    ctx.renderer.selectedTransitionId = null;
                     this.isDragging = true;
                     this.dragStateId = state.id;
                     this.dragOffset = {
@@ -76,31 +104,33 @@ export class InteractionManager {
                     };
                     this.app.updatePropertyPanel();
                 } else if (transition) {
-                    this.renderer.selectedTransitionId = transition.id;
-                    this.renderer.selectedStateId = null;
+                    ctx.renderer.selectedTransitionId = transition.id;
+                    ctx.renderer.selectedStateId = null;
                     this.app.updatePropertyPanel();
                 } else {
-                    this.renderer.selectedStateId = null;
-                    this.renderer.selectedTransitionId = null;
+                    ctx.renderer.selectedStateId = null;
+                    ctx.renderer.selectedTransitionId = null;
                     this.isPanning = true;
-                    this.canvas.style.cursor = 'grabbing';
+                    ctx.canvas.style.cursor = 'grabbing';
                     this.app.updatePropertyPanel();
                 }
                 break;
                 
             case EDIT_MODE.ADD_STATE:
-                this.app.addAction(() => {
-                    const newState = this.app.automaton.addState(null, worldPos.x, worldPos.y);
-                    this.renderer.selectedStateId = newState.id;
-                    this.renderer.selectedTransitionId = null;
-                    this.app.updateUI();
-                });
+                if (side === 'left') {
+                    this.app.addAction(() => {
+                        const newState = this.app.automaton.addState(null, worldPos.x, worldPos.y);
+                        this.renderer.selectedStateId = newState.id;
+                        this.renderer.selectedTransitionId = null;
+                        this.app.updateUI();
+                    });
+                }
                 break;
                 
             case EDIT_MODE.ADD_TRANSITION:
-                if (state) {
+                if (state && side === 'left') {
                     this.transitionStartState = state;
-                    this.renderer.previewTransition = {
+                    ctx.renderer.previewTransition = {
                         from: state,
                         toX: worldPos.x,
                         toY: worldPos.y
@@ -109,7 +139,7 @@ export class InteractionManager {
                 break;
                 
             case EDIT_MODE.SET_START:
-                if (state) {
+                if (state && side === 'left') {
                     this.app.addAction(() => {
                         this.app.automaton.setStartState(state.id);
                         this.app.updateUI();
@@ -118,7 +148,7 @@ export class InteractionManager {
                 break;
                 
             case EDIT_MODE.SET_ACCEPT:
-                if (state) {
+                if (state && side === 'left') {
                     this.app.addAction(() => {
                         this.app.automaton.toggleAcceptState(state.id);
                         this.app.updateUI();
@@ -127,13 +157,13 @@ export class InteractionManager {
                 break;
                 
             case EDIT_MODE.DELETE:
-                if (state) {
+                if (state && side === 'left') {
                     this.app.addAction(() => {
                         this.app.automaton.removeState(state.id);
                         this.renderer.selectedStateId = null;
                         this.app.updateUI();
                     });
-                } else if (transition) {
+                } else if (transition && side === 'left') {
                     this.app.addAction(() => {
                         this.app.automaton.removeTransition(transition.id);
                         this.renderer.selectedTransitionId = null;
@@ -143,100 +173,120 @@ export class InteractionManager {
                 break;
         }
         
-        this.requestRender();
+        this.requestRender(side);
     }
 
-    onMouseMove(e) {
-        const screenPos = this.getCanvasMousePos(e);
-        const worldPos = this.renderer.screenToWorld(screenPos.x, screenPos.y);
+    onMouseMove(e, side = 'left') {
+        const ctx = this.getContext(side);
+        if (!ctx.renderer || !ctx.automaton) return;
         
-        this.app.updateMousePosition(worldPos);
+        const screenPos = this.getCanvasMousePos(e, ctx.canvas);
+        const worldPos = ctx.renderer.screenToWorld(screenPos.x, screenPos.y);
+        
+        if (side === 'left') {
+            this.app.updateMousePosition(worldPos);
+        }
         
         if (this.isPanning) {
-            const dx = (screenPos.x - this.lastMousePos.x) / this.renderer.zoom;
-            const dy = (screenPos.y - this.lastMousePos.y) / this.renderer.zoom;
-            this.renderer.panX += dx;
-            this.renderer.panY += dy;
+            const dx = (screenPos.x - this.lastMousePos.x) / ctx.renderer.zoom;
+            const dy = (screenPos.y - this.lastMousePos.y) / ctx.renderer.zoom;
+            ctx.renderer.panX += dx;
+            ctx.renderer.panY += dy;
             this.lastMousePos = screenPos;
-            this.requestRender();
+            this.requestRender(side);
             return;
         }
         
-        if (this.isDragging && this.dragStateId) {
+        if (this.isDragging && this.dragStateId && side === 'left') {
             const state = this.app.automaton.states.get(this.dragStateId);
             if (state) {
                 state.x = worldPos.x - this.dragOffset.x;
                 state.y = worldPos.y - this.dragOffset.y;
                 this.app.isModified = true;
             }
-            this.requestRender();
+            this.requestRender(side);
             return;
         }
         
-        if (this.transitionStartState) {
-            this.renderer.previewTransition.toX = worldPos.x;
-            this.renderer.previewTransition.toY = worldPos.y;
-            this.requestRender();
+        if (this.transitionStartState && side === 'left') {
+            ctx.renderer.previewTransition.toX = worldPos.x;
+            ctx.renderer.previewTransition.toY = worldPos.y;
+            this.requestRender(side);
             return;
         }
         
-        const state = this.renderer.getStateAtPoint(worldPos.x, worldPos.y, this.app.automaton);
-        const transition = this.renderer.getTransitionAtPoint(worldPos.x, worldPos.y, this.app.automaton);
+        const state = ctx.renderer.getStateAtPoint(worldPos.x, worldPos.y, ctx.automaton);
+        const transition = ctx.renderer.getTransitionAtPoint(worldPos.x, worldPos.y, ctx.automaton);
         
-        this.renderer.hoveredStateId = state ? state.id : null;
-        this.renderer.hoveredTransitionId = transition ? transition.id : null;
+        ctx.renderer.hoveredStateId = state ? state.id : null;
+        ctx.renderer.hoveredTransitionId = transition ? transition.id : null;
         
-        this.updateCursor(state, transition);
+        this.updateCursor(state, transition, ctx.canvas);
         
-        this.requestRender();
+        this.requestRender(side);
     }
 
-    onMouseUp(e) {
-        const screenPos = this.getCanvasMousePos(e);
-        const worldPos = this.renderer.screenToWorld(screenPos.x, screenPos.y);
+    onMouseUp(e, side = 'left') {
+        const ctx = this.getContext(side);
+        if (!ctx.renderer || !ctx.automaton) return;
+        
+        const screenPos = this.getCanvasMousePos(e, ctx.canvas);
+        const worldPos = ctx.renderer.screenToWorld(screenPos.x, screenPos.y);
         
         if (this.isPanning) {
             this.isPanning = false;
-            this.canvas.style.cursor = 'default';
+            ctx.canvas.style.cursor = 'default';
         }
         
-        if (this.isDragging) {
+        if (this.isDragging && side === 'left') {
             this.isDragging = false;
             this.dragStateId = null;
             this.app.pushHistory();
         }
         
-        if (this.transitionStartState) {
-            const targetState = this.renderer.getStateAtPoint(worldPos.x, worldPos.y, this.app.automaton);
+        if (this.transitionStartState && side === 'left') {
+            const targetState = ctx.renderer.getStateAtPoint(worldPos.x, worldPos.y, ctx.automaton);
             if (targetState) {
                 this.showTransitionDialog(this.transitionStartState, targetState);
             }
             this.transitionStartState = null;
-            this.renderer.previewTransition = null;
+            ctx.renderer.previewTransition = null;
         }
         
-        this.requestRender();
+        this.requestRender(side);
     }
 
-    onMouseLeave(e) {
+    onMouseLeave(e, side = 'left') {
+        const ctx = this.getContext(side);
+        if (!ctx.renderer) return;
+        
         this.isPanning = false;
         this.isDragging = false;
         this.dragStateId = null;
         this.transitionStartState = null;
-        this.renderer.previewTransition = null;
-        this.renderer.hoveredStateId = null;
-        this.renderer.hoveredTransitionId = null;
-        this.canvas.style.cursor = 'default';
-        this.requestRender();
+        ctx.renderer.previewTransition = null;
+        ctx.renderer.hoveredStateId = null;
+        ctx.renderer.hoveredTransitionId = null;
+        ctx.canvas.style.cursor = 'default';
+        this.requestRender(side);
     }
 
-    onWheel(e) {
+    onWheel(e, side = 'left') {
         e.preventDefault();
-        const screenPos = this.getCanvasMousePos(e);
+        const ctx = this.getContext(side);
+        if (!ctx.renderer) return;
+        
+        const screenPos = this.getCanvasMousePos(e, ctx.canvas);
         const factor = e.deltaY > 0 ? 0.9 : 1.1;
-        this.renderer.zoomAt(screenPos.x, screenPos.y, factor);
-        this.app.updateZoomLevel();
-        this.requestRender();
+        ctx.renderer.zoomAt(screenPos.x, screenPos.y, factor);
+        
+        if (side === 'left') {
+            this.app.updateZoomLevel();
+        } else {
+            this.app.updateZoomLevelRight();
+        }
+        
+        this.requestRender(side);
     }
 
     onKeyDown(e) {
@@ -292,29 +342,30 @@ export class InteractionManager {
         this.requestRender();
     }
 
-    updateCursor(state, transition) {
+    updateCursor(state, transition, canvas) {
+        const targetCanvas = canvas || this.canvas;
         switch (this.editMode) {
             case EDIT_MODE.SELECT:
                 if (state) {
-                    this.canvas.style.cursor = 'grab';
+                    targetCanvas.style.cursor = 'grab';
                 } else if (transition) {
-                    this.canvas.style.cursor = 'pointer';
+                    targetCanvas.style.cursor = 'pointer';
                 } else {
-                    this.canvas.style.cursor = 'default';
+                    targetCanvas.style.cursor = 'default';
                 }
                 break;
             case EDIT_MODE.ADD_STATE:
-                this.canvas.style.cursor = 'crosshair';
+                targetCanvas.style.cursor = 'crosshair';
                 break;
             case EDIT_MODE.ADD_TRANSITION:
-                this.canvas.style.cursor = state ? 'crosshair' : 'default';
+                targetCanvas.style.cursor = state ? 'crosshair' : 'default';
                 break;
             case EDIT_MODE.SET_START:
             case EDIT_MODE.SET_ACCEPT:
-                this.canvas.style.cursor = state ? 'pointer' : 'default';
+                targetCanvas.style.cursor = state ? 'pointer' : 'default';
                 break;
             case EDIT_MODE.DELETE:
-                this.canvas.style.cursor = (state || transition) ? 'not-allowed' : 'default';
+                targetCanvas.style.cursor = (state || transition) ? 'not-allowed' : 'default';
                 break;
         }
     }
@@ -353,12 +404,15 @@ export class InteractionManager {
         });
     }
 
-    requestRender() {
+    requestRender(side = 'left') {
         if (this.animationFrameId) return;
         
         this.animationFrameId = requestAnimationFrame(() => {
             this.animationFrameId = null;
             this.app.render();
+            if (this.app.isCompareMode) {
+                this.app.renderRight();
+            }
         });
     }
 }
