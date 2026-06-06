@@ -1,0 +1,16 @@
+{
+  "name": "automata-simulator",
+  "version": "1.0.0",
+  "description": "四合一自动机可视化模拟器 - DFA/NFA/PDA/TM",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx http-server -p 3003 -c-1",
+    "dev": "npx http-server -p 3003 -c-1 -o"
+  },
+  "keywords": ["automata", "simulator", "dfa", "nfa", "pda", "turing-machine"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}

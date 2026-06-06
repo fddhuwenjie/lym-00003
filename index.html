@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>四合一自动机可视化模拟器</title>
+    <link rel="stylesheet" href="src/css/style.css">
+</head>
+<body>
+    <div id="app">
+        <header class="toolbar">
+            <div class="toolbar-left">
+                <h1>🔄 自动机模拟器</h1>
+                <div class="model-switcher">
+                    <button class="model-btn active" data-model="dfa">DFA</button>
+                    <button class="model-btn" data-model="nfa">NFA</button>
+                    <button class="model-btn" data-model="pda">PDA</button>
+                    <button class="model-btn" data-model="tm">图灵机</button>
+                </div>
+            </div>
+            <div class="toolbar-center">
+                <div class="edit-tools">
+                    <button class="tool-btn" id="btn-select" title="选择/移动 (V)">
+                        <span class="icon">↖</span> 选择
+                    </button>
+                    <button class="tool-btn" id="btn-add-state" title="添加状态 (S)">
+                        <span class="icon">⭕</span> 状态
+                    </button>
+                    <button class="tool-btn" id="btn-add-transition" title="添加转移 (T)">
+                        <span class="icon">→</span> 转移
+                    </button>
+                    <button class="tool-btn" id="btn-set-start" title="设为初始状态">
+                        <span class="icon">▶</span> 初始
+                    </button>
+                    <button class="tool-btn" id="btn-set-accept" title="切换接受状态">
+                        <span class="icon">◎</span> 接受
+                    </button>
+                    <button class="tool-btn" id="btn-delete" title="删除选中 (Del)">
+                        <span class="icon">🗑</span> 删除
+                    </button>
+                </div>
+                <div class="history-tools">
+                    <button class="tool-btn" id="btn-undo" title="撤销 (Ctrl+Z)">
+                        <span class="icon">↶</span>
+                    </button>
+                    <button class="tool-btn" id="btn-redo" title="重做 (Ctrl+Y)">
+                        <span class="icon">↷</span>
+                    </button>
+                </div>
+            </div>
+            <div class="toolbar-right">
+                <button class="tool-btn" id="btn-layout" title="自动布局">
+                    <span class="icon">⚡</span> 布局
+                </button>
+                <button class="tool-btn" id="btn-import" title="导入JSON">
+                    <span class="icon">📥</span> 导入
+                </button>
+                <button class="tool-btn" id="btn-export" title="导出JSON">
+                    <span class="icon">📤</span> 导出
+                </button>
+                <button class="tool-btn" id="btn-examples" title="预置示例">
+                    <span class="icon">📚</span> 示例
+                </button>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <aside class="sidebar left-sidebar">
+                <div class="sidebar-section">
+                    <h3>🎯 正则转换</h3>
+                    <div class="regex-panel">
+                        <input type="text" id="regex-input" placeholder="输入正则表达式 (如: a(b|c)*d)">
+                        <div class="regex-buttons">
+                            <button id="btn-regex-to-nfa">正则 → NFA</button>
+                            <button id="btn-nfa-to-dfa">NFA → DFA</button>
+                            <button id="btn-step-conversion" disabled>分步执行</button>
+                        </div>
+                        <div id="conversion-steps" class="conversion-steps"></div>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3>▶️ 模拟运行</h3>
+                    <div class="simulation-panel">
+                        <input type="text" id="input-string" placeholder="输入测试串">
+                        <div class="simulation-controls">
+                            <button id="btn-reset-sim" title="重置">⏮</button>
+                            <button id="btn-step-sim" title="单步执行">⏭</button>
+                            <button id="btn-play-sim" title="自动播放">▶</button>
+                            <button id="btn-pause-sim" title="暂停" disabled>⏸</button>
+                        </div>
+                        <div class="simulation-speed">
+                            <label>速度:</label>
+                            <input type="range" id="sim-speed" min="100" max="2000" value="800" step="100">
+                            <span id="speed-value">800ms</span>
+                        </div>
+                        <div id="simulation-result" class="simulation-result"></div>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3>📊 当前状态</h3>
+                    <div id="automaton-info" class="automaton-info">
+                        <p><strong>类型:</strong> <span id="info-type">DFA</span></p>
+                        <p><strong>状态数:</strong> <span id="info-states">0</span></p>
+                        <p><strong>转移数:</strong> <span id="info-transitions">0</span></p>
+                    </div>
+                    <div id="pda-stack" class="pda-stack" style="display:none;">
+                        <h4>栈内容:</h4>
+                        <div id="stack-display" class="stack-display"></div>
+                    </div>
+                    <div id="tm-tape" class="tm-tape" style="display:none;">
+                        <h4>磁带内容:</h4>
+                        <div id="tape-display" class="tape-display"></div>
+                    </div>
+                </div>
+            </aside>
+
+            <main class="canvas-container">
+                <canvas id="main-canvas"></canvas>
+                <div class="canvas-controls">
+                    <button id="btn-zoom-in" title="放大">+</button>
+                    <span id="zoom-level">100%</span>
+                    <button id="btn-zoom-out" title="缩小">−</button>
+                    <button id="btn-zoom-fit" title="适应画布">⛶</button>
+                </div>
+                <div class="status-bar">
+                    <span id="status-text">就绪</span>
+                    <span id="mouse-position">x: 0, y: 0</span>
+                </div>
+            </main>
+
+            <aside class="sidebar right-sidebar">
+                <div class="sidebar-section">
+                    <h3>✏️ 属性编辑</h3>
+                    <div id="property-panel" class="property-panel">
+                        <p class="hint">选择状态或转移以编辑属性</p>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3>📑 转移列表</h3>
+                    <div id="transitions-list" class="transitions-list"></div>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <div id="examples-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📚 预置示例</h2>
+                <button class="close-btn" id="close-examples">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="examples-list" class="examples-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="import-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📥 导入 JSON</h2>
+                <button class="close-btn" id="close-import">&times;</button>
+            </div>
+            <div class="modal-body">
+                <textarea id="import-textarea" placeholder="粘贴 JSON 内容..."></textarea>
+                <div class="modal-actions">
+                    <button id="btn-do-import">导入</button>
+                    <button id="btn-cancel-import">取消</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="export-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📤 导出 JSON</h2>
+                <button class="close-btn" id="close-export">&times;</button>
+            </div>
+            <div class="modal-body">
+                <textarea id="export-textarea" readonly></textarea>
+                <div class="modal-actions">
+                    <button id="btn-copy-export">复制到剪贴板</button>
+                    <button id="btn-download-export">下载文件</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="src/js/main.js"></script>
+</body>
+</html>
